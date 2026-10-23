@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photo Date Fixer</title>
+<style>
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    max-width: 800px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+    color: #222;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .hint { color: #666; font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .row { margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  label { font-size: 1rem; }
+  input[type="text"] {
+    padding: 0.5rem;
+    flex: 1;
+    min-width: 300px;
+    font-size: 1rem;
+  }
+  button {
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #output {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    padding: 1rem;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.9rem;
+    max-height: 400px;
+    overflow-y: auto;
+    border-radius: 4px;
+  }
+  .stats {
+    margin-top: 1rem;
+    font-weight: bold;
+    font-size: 1rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>Photo Date Fixer</h1>
+<p class="hint">Sets EXIF "date taken" / "creation date" of photos inside <code><YEAR>/<MM>/</code> folders to match the folder names, keeping the existing day and time.</p>
+
+<div class="row">
+  <label for="folder">Photos folder:</label>
+  <input type="text" id="folder" placeholder="/path/to/your/photos">
+</div>
+<div class="row">
+  <label><input type="checkbox" id="dryRun"> Dry run (show what would change, don't write)</label>
+  <label style="margin-left:1rem"><input type="checkbox" id="verbose"> Verbose (per-file details)</label>
+</div>
+<div class="row">
+  <button id="runBtn">Run</button>
+</div>
+
+<div id="stats" class="stats" style="display:none;"></div>
+<div id="output"></div>
+
+<script>
+  const folderInput = document.getElementById('folder');
+  const dryRunCheckbox = document.getElementById('dryRun');
+  const verboseCheckbox = document.getElementById('verbose');
+  const runBtn = document.getElementById('runBtn');
+  const output = document.getElementById('output');
+  const statsEl = document.getElementById('stats');
+
+  runBtn.addEventListener('click', async () => {
+    const root = folderInput.value.trim();
+    if (!root) {
+      alert('Please enter a photos folder path.');
+      return;
+    }
+
+    runBtn.disabled = true;
+    output.textContent = 'Running...';
+    statsEl.style.display = 'none';
+
+    try {
+      const res = await fetch('/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          root,
+          dryRun: dryRunCheckbox.checked,
+          verbose: verboseCheckbox.checked
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        output.textContent = data.error || 'Server error';
+        return;
+      }
+
+      output.textContent = data.output || '(no output)';
+
+      if (data.stats) {
+        statsEl.style.display = 'block';
+        statsEl.textContent =
+          `Scanned: ${data.stats.scanned} | Changed: ${data.stats.changed} | Skipped: ${data.stats.skipped} | Errors: ${data.stats.errors}`;
+      }
+    } catch (err) {
+      output.textContent = 'Error: ' + err.message;
+    } finally {
+      runBtn.disabled = false;
+    }
+  });
+</script>
+
+</body>
+</html>

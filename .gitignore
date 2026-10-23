@@ -1,0 +1,12 @@
+# Node / npm
+node_modules/
+package-lock.json
+UI/node_modules/
+UI/package-lock.json
+
+# OS‑specific junk (macOS, Windows)
+.DS_Store
+thumbs.db
+
+# When you add env files later
+.env

@@ -1,0 +1,12 @@
+{
+  "name": "photo-transformer-ui",
+  "version": "1.0.0",
+  "description": "Simple web UI for the photo date fixer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
