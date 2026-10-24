@@ -34,19 +34,31 @@ function processPhotos(root, opts) {
 
     let newDate;
     let isDefault;
+    let needsWrite = true;
 
     if (existing) {
       // Keep existing day/time, use folder year/month.
       newDate = `${grandParent}:${parent}:${existing.day} ${existing.time}`;
       isDefault = false;
+
+      // If year/month already match the folder, still write if either tag
+      // (DateTimeOriginal / CreateDate) is missing.
+      if (
+        existing.year === grandParent &&
+        existing.month === parent &&
+        existing.hasDateTimeOriginal &&
+        existing.hasCreateDate
+      ) {
+        needsWrite = false;
+      }
     } else {
       // No EXIF metadata: create it using folder year/month, default day/time.
       newDate = `${grandParent}:${parent}:01 01:00:00`;
       isDefault = true;
     }
 
-    // Nothing to do if year/month already match the folders.
-    if (!isDefault && existing.year === grandParent && existing.month === parent) {
+    // Nothing to do if already correct and both tags present.
+    if (!needsWrite) {
       stats.skipped++;
       if (opts.verbose) {
         console.log(`SKIP (already correct): ${filePath}`);
@@ -55,7 +67,6 @@ function processPhotos(root, opts) {
     }
 
     logStep(opts, filePath, isDefault, existing, newDate);
-
     if (opts.dryRun) {
       stats.changed++; // counted as "would change"
       continue;
@@ -75,6 +86,7 @@ function processPhotos(root, opts) {
 }
 
 module.exports = { processPhotos };
+
 function logStep(opts, filePath, isDefault, existing, newDate) {
   if (opts.dryRun || opts.verbose) {
     console.log(

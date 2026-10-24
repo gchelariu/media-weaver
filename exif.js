@@ -18,7 +18,8 @@ function checkExiftool() {
 
 /**
  * Read the existing date/taken time from a file.
- * Returns { year, month, day, time, raw } or null if no usable date exists.
+ * Returns { year, month, day, time, raw, hasDateTimeOriginal, hasCreateDate }
+ * or null if no usable date exists.
  */
 function readExistingDate(filePath) {
   let out;
@@ -40,33 +41,67 @@ function readExistingDate(filePath) {
   }
 
   const obj = arr && arr.length ? arr[0] : {};
+  let first = null;
   for (const tag of TAGS_TO_READ) {
     const value = obj[tag];
     if (typeof value !== 'string') continue;
     const m = value.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}:\d{2}:\d{2})$/);
     if (m) {
-      return {
-        year: m[1],
-        month: m[2],
-        day: m[3],
-        time: m[4],
-        raw: value,
-      };
+      if (!first) {
+        first = {
+          year: m[1],
+          month: m[2],
+          day: m[3],
+          time: m[4],
+          raw: value,
+        };
+      }
     }
   }
-  return null;
+  if (!first) return null;
+
+  return {
+    ...first,
+    hasDateTimeOriginal: typeof obj.DateTimeOriginal === 'string',
+    hasCreateDate: typeof obj.CreateDate === 'string',
+  };
+}
+
+/**
+ * Build the date-tag exiftool args (plus overwrite/minor-error flags).
+ */
+function dateArgs(newDate) {
+  const args = ['-overwrite_original', '-m', '-api', 'IgnoreMinorErrors=1'];
+  for (const tag of TAGS_TO_WRITE) {
+    args.push(`-${tag}=${newDate}`);
+  }
+  return args;
 }
 
 /**
  * Write the new date to the file's EXIF tags.
+ * If the file has corrupt EXIF structure (e.g. bad OtherImageStart data),
+ * the normal write may fail. In that case we wipe the broken EXIF block
+ * with `-exif:all=` and write fresh metadata.
  */
 function writeDate(filePath, newDate) {
-  const args = ['-overwrite_original'];
-  for (const tag of TAGS_TO_WRITE) {
-    args.push(`-${tag}=${newDate}`);
+  const args = [...dateArgs(newDate), filePath];
+  try {
+    execFileSync('exiftool', args, { encoding: 'utf8' });
+    return;
+  } catch (err) {
+    // Fallback: delete all existing EXIF (removing corrupt data), then write fresh.
+    const wipeArgs = [
+      '-overwrite_original',
+      '-m',
+      '-api',
+      'IgnoreMinorErrors=1',
+      '-exif:all=',
+      ...dateArgs(newDate),
+      filePath,
+    ];
+    execFileSync('exiftool', wipeArgs, { encoding: 'utf8' });
   }
-  args.push(filePath);
-  execFileSync('exiftool', args, { encoding: 'utf8' });
 }
 
 module.exports = { checkExiftool, readExistingDate, writeDate };
