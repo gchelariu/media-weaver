@@ -2,6 +2,12 @@
  * processor.js
  * Core processing logic: walk the tree, match <YEAR>/<MM> folders,
  * compute the new date, and write it (or count what would change).
+ *
+ * Single-pass behavior:
+ *   - Files that already have an EXIF date: keep existing day/time, update
+ *     year/month to match the folder.
+ *   - Files with NO EXIF date: create EXIF metadata using the folder's
+ *     year/month with default day/time (01 01:00:00).
  */
 
 const path = require('path');
@@ -25,16 +31,22 @@ function processPhotos(root, opts) {
     stats.scanned++;
 
     const existing = readExistingDate(filePath);
-    if (!existing) {
-      stats.skipped++;
-      if (opts.verbose) {
-        console.log(`SKIP (no EXIF date found): ${filePath}`);
-      }
-      continue;
+
+    let newDate;
+    let isDefault;
+
+    if (existing) {
+      // Keep existing day/time, use folder year/month.
+      newDate = `${grandParent}:${parent}:${existing.day} ${existing.time}`;
+      isDefault = false;
+    } else {
+      // No EXIF metadata: create it using folder year/month, default day/time.
+      newDate = `${grandParent}:${parent}:01 01:00:00`;
+      isDefault = true;
     }
 
     // Nothing to do if year/month already match the folders.
-    if (existing.year === grandParent && existing.month === parent) {
+    if (!isDefault && existing.year === grandParent && existing.month === parent) {
       stats.skipped++;
       if (opts.verbose) {
         console.log(`SKIP (already correct): ${filePath}`);
@@ -42,13 +54,7 @@ function processPhotos(root, opts) {
       continue;
     }
 
-    const newDate = `${grandParent}:${parent}:${existing.day} ${existing.time}`;
-
-    if (opts.dryRun || opts.verbose) {
-      console.log(
-        `${opts.dryRun ? '[DRY-RUN] ' : ''}${filePath}\n  ${existing.raw}  ->  ${newDate}`
-      );
-    }
+    logStep(opts, filePath, isDefault, existing, newDate);
 
     if (opts.dryRun) {
       stats.changed++; // counted as "would change"
@@ -69,3 +75,11 @@ function processPhotos(root, opts) {
 }
 
 module.exports = { processPhotos };
+function logStep(opts, filePath, isDefault, existing, newDate) {
+  if (opts.dryRun || opts.verbose) {
+    console.log(
+      `${opts.dryRun ? '[DRY-RUN] ' : ''}${filePath}\n  ${isDefault ? '(no EXIF)  ->  ' : `${existing.raw}  ->  `}${newDate}`
+    );
+  }
+}
+
