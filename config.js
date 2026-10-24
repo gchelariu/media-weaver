@@ -11,10 +11,12 @@ const DATE_FORMAT = '%Y:%m:%d %H:%M:%S';
 
 // Default EXIF date/time assigned to files that have no EXIF metadata.
 // Year and month are what matter most (YYYY:MM:DD HH:MM:SS).
-const DEFAULT_EXIF_DATE = '0001:01:01 01:00:00';
+const DEFAULT_EXIF_DATE = '0001:01:02 12:31:56';
 
 const YEAR_RE = /^\d{4}$/;
-const MONTH_RE = /^(0[1-9]|1[0-2])$/;
+// Match folders that START with a valid month (e.g. "05", "05-Test-test").
+// Only the first two characters matter; anything after is ignored.
+const MONTH_PREFIX_RE = /^(0[1-9]|1[0-2])/;
 
 const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.tif', '.tiff', '.png', '.webp', '.heic', '.heif',
@@ -26,7 +28,7 @@ module.exports = {
   TAGS_TO_WRITE,
   DATE_FORMAT,
   YEAR_RE,
-  MONTH_RE,
+  MONTH_PREFIX_RE,
   IMAGE_EXTENSIONS,
   DEFAULT_EXIF_DATE,
 };

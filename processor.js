@@ -13,7 +13,7 @@
 const path = require('path');
 const { walkFiles, isImageFile } = require('./fs-utils');
 const { readExistingDate, writeDate } = require('./exif');
-const { YEAR_RE, MONTH_RE } = require('./config');
+const { YEAR_RE, MONTH_PREFIX_RE, DEFAULT_EXIF_DATE } = require('./config');
 
 function processPhotos(root, opts) {
   const stats = { scanned: 0, changed: 0, skipped: 0, errors: 0 };
@@ -21,12 +21,15 @@ function processPhotos(root, opts) {
   for (const filePath of walkFiles(root)) {
     if (!isImageFile(filePath)) continue;
 
-    const parent = path.basename(path.dirname(filePath));        // month folder
+    const parent = path.basename(path.dirname(filePath));        // month folder (e.g. "05" or "05-Test-test")
     const grandParent = path.basename(path.dirname(path.dirname(filePath))); // year folder
 
-    if (!YEAR_RE.test(grandParent) || !MONTH_RE.test(parent)) {
-      continue; // not inside a <YEAR>/<MM> pair
+    if (!YEAR_RE.test(grandParent) || !MONTH_PREFIX_RE.test(parent)) {
+      continue; // not inside a <YEAR>/<MM*> pair
     }
+
+    // Month is just the first two digits (anything after is ignored).
+    const month = parent.slice(0, 2);
 
     stats.scanned++;
 
@@ -38,14 +41,14 @@ function processPhotos(root, opts) {
 
     if (existing) {
       // Keep existing day/time, use folder year/month.
-      newDate = `${grandParent}:${parent}:${existing.day} ${existing.time}`;
+      newDate = `${grandParent}:${month}:${existing.day} ${existing.time}`;
       isDefault = false;
 
       // If year/month already match the folder, still write if either tag
       // (DateTimeOriginal / CreateDate) is missing.
       if (
         existing.year === grandParent &&
-        existing.month === parent &&
+        existing.month === month &&
         existing.hasDateTimeOriginal &&
         existing.hasCreateDate
       ) {
@@ -53,7 +56,9 @@ function processPhotos(root, opts) {
       }
     } else {
       // No EXIF metadata: create it using folder year/month, default day/time.
-      newDate = `${grandParent}:${parent}:01 01:00:00`;
+      const [defaultDate, defaultTime] = DEFAULT_EXIF_DATE.split(' ');
+      const [, , defaultDay] = defaultDate.split(':');
+      newDate = `${grandParent}:${month}:${defaultDay} ${defaultTime}`;
       isDefault = true;
     }
 
