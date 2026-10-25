@@ -5,11 +5,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const { IMAGE_EXTENSIONS } = require('./config');
+const { IMAGE_EXTENSIONS, MOVIE_EXTENSIONS } = require('./config');
 
 function isImageFile(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return IMAGE_EXTENSIONS.has(ext);
+}
+
+function isVideoFile(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return MOVIE_EXTENSIONS.has(ext);
 }
 
 /**
@@ -33,4 +38,4 @@ function* walkFiles(dir) {
   }
 }
 
-module.exports = { isImageFile, walkFiles };
+module.exports = { isImageFile, isVideoFile, walkFiles };

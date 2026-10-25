@@ -6,6 +6,39 @@
 const TAGS_TO_READ = ['DateTimeOriginal', 'CreateDate'];
 const TAGS_TO_WRITE = ['DateTimeOriginal', 'CreateDate'];
 
+// Video tags to read (used to decide if a video already has all its dates).
+const VIDEO_TAGS_TO_READ = [
+  'CreateDate',
+  'ModifyDate',
+  'TrackCreateDate',
+  'TrackModifyDate',
+  'MediaCreateDate',
+  'MediaModifyDate',
+  'DateTimeOriginal',
+  'XMP:CreateDate',
+  'XMP:DateTimeOriginal',
+];
+
+// QuickTime tags for movie files (.mov, .mp4, .m4v).
+const QT_TAGS_TO_READ = ['CreateDate', 'ModifyDate'];
+const QT_TAGS_TO_WRITE = ['CreateDate', 'ModifyDate'];
+
+const MOVIE_EXTENSIONS = new Set(['.mov', '.mp4', '.m4v', '.mkv']);
+
+// All metadata date tags written for video files (.mov, .mp4, .m4v, .mkv).
+// Matches the manual exiftool command used for videos.
+const VIDEO_DATE_TAGS = [
+  'CreateDate',
+  'ModifyDate',
+  'TrackCreateDate',
+  'TrackModifyDate',
+  'MediaCreateDate',
+  'MediaModifyDate',
+  'DateTimeOriginal',
+  'XMP:CreateDate',
+  'XMP:DateTimeOriginal',
+];
+
 // EXIF date/time format: "YYYY:MM:DD HH:MM:SS"
 const DATE_FORMAT = '%Y:%m:%d %H:%M:%S';
 
@@ -20,15 +53,19 @@ const MONTH_PREFIX_RE = /^(0[1-9]|1[0-2])/;
 
 const IMAGE_EXTENSIONS = new Set([
   '.jpg', '.jpeg', '.tif', '.tiff', '.png', '.webp', '.heic', '.heif',
-  '.mov', '.mp4', '.avi', '.m4v', '.mkv',
 ]);
 
 module.exports = {
   TAGS_TO_READ,
   TAGS_TO_WRITE,
+  VIDEO_TAGS_TO_READ,
   DATE_FORMAT,
   YEAR_RE,
   MONTH_PREFIX_RE,
   IMAGE_EXTENSIONS,
+  MOVIE_EXTENSIONS,
+  QT_TAGS_TO_READ,
+  QT_TAGS_TO_WRITE,
+  VIDEO_DATE_TAGS,
   DEFAULT_EXIF_DATE,
 };

@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { checkExiftool } = require('./exif');
-const { processPhotos } = require('./processor');
+const { processMedia } = require('./processor');
 
 function printHelp() {
   console.log(`
@@ -70,7 +70,7 @@ function main() {
 
   if (opts.dryRun) console.log('[DRY-RUN] No files will be modified.\n');
 
-  const stats = processPhotos(root, opts);
+  const stats = processMedia(root, opts);
 
   console.log('\nDone.');
   console.log(`  Scanned: ${stats.scanned}`);
