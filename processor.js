@@ -3,15 +3,14 @@
  * Core processing logic: walk the tree, match <YEAR>/<MM> folders,
  * compute the new date, and write it (or count what would change).
  *
- * Images and videos are handled by separate methods because they write
- * different sets of metadata tags:
- *   - Images: DateTimeOriginal + CreateDate, then FileModifyDate.
- *   - Videos: all metadata date tags (CreateDate, ModifyDate,
+ * Images and videos are handled in a single pass:
+ *   - Images: write DateTimeOriginal + CreateDate, then FileModifyDate.
+ *   - Videos: write all metadata date tags (CreateDate, ModifyDate,
  *     TrackCreateDate, TrackModifyDate, MediaCreateDate, MediaModifyDate,
  *     DateTimeOriginal, XMP:CreateDate, XMP:DateTimeOriginal), then
  *     FileModifyDate.
  *
- * Single-pass behavior (both types):
+ * Single-pass behavior:
  *   - Files that already have an EXIF date: keep existing day/time, update
  *     year/month to match the folder.
  *   - Files with NO EXIF date: create EXIF metadata using the folder's
@@ -32,7 +31,7 @@ const {
 const IMAGE_TAGS = ['DateTimeOriginal', 'CreateDate'];
 
 /**
- * Compute the target date string from the existing metadata and folder names.
+ * Compute the target date string from existing metadata and folder names.
  * Keeps the existing day/time, swaps in folder year/month.
  */
 function computeNewDate(existing, grandParent, month) {
@@ -45,140 +44,114 @@ function computeNewDate(existing, grandParent, month) {
 }
 
 /**
- * Process image files only.
+ * Process a single image file.
+ * Returns { changed, skipped } booleans (whether the file was changed/skipped).
  */
-function processImages(root, opts) {
-  const stats = { scanned: 0, changed: 0, skipped: 0, errors: 0 };
+function processSingleImage(filePath, grandParent, month, opts) {
+  const existing = readExistingDate(filePath);
+  const newDate = computeNewDate(existing, grandParent, month);
+  const isDefault = !existing;
 
-  for (const filePath of walkFiles(root)) {
-    if (!isImageFile(filePath)) continue;
-
-    const parent = path.basename(path.dirname(filePath));        // month folder
-    const grandParent = path.basename(path.dirname(path.dirname(filePath))); // year folder
-
-    if (!YEAR_RE.test(grandParent) || !MONTH_PREFIX_RE.test(parent)) {
-      continue; // not inside a <YEAR>/<MM*> pair
-    }
-
-    const month = parent.slice(0, 2);
-
-    stats.scanned++;
-
-    const existing = readExistingDate(filePath);
-    const newDate = computeNewDate(existing, grandParent, month);
-    const isDefault = !existing;
-
-    // Skip if year/month already match and both image tags are present.
-    if (
-      existing &&
-      existing.year === grandParent &&
-      existing.month === month &&
-      existing.hasDateTimeOriginal &&
-      existing.hasCreateDate
-    ) {
-      stats.skipped++;
-      if (opts.verbose) {
-        console.log(`SKIP (already correct): ${filePath}`);
-      }
-      continue;
-    }
-
+  // Skip if year/month already match and both image tags are present.
+  if (
+    existing &&
+    existing.year === grandParent &&
+    existing.month === month &&
+    existing.hasDateTimeOriginal &&
+    existing.hasCreateDate
+  ) {
     logStep(opts, filePath, isDefault, existing, newDate);
-    if (opts.dryRun) {
-      stats.changed++;
-      continue;
-    }
-
-    try {
-      writeDate(filePath, newDate);
-      stats.changed++;
-      if (opts.verbose) console.log(`  OK`);
-    } catch (err) {
-      stats.errors++;
-      console.error(`ERROR writing ${filePath}: ${err.message}`);
-    }
+    return { changed: false, skipped: true };
   }
 
-  return stats;
+  // DRY-RUN: count but don't write, and log.
+  if (opts.dryRun) {
+    logStep(opts, filePath, isDefault, existing, newDate);
+    return { changed: true, skipped: false };
+  }
+
+  try {
+    writeDate(filePath, newDate);
+    logStep(opts, filePath, isDefault, existing, newDate);
+    return { changed: true, skipped: false };
+  } catch (err) {
+    console.error(`ERROR writing ${filePath}: ${err.message}`);
+    return { changed: false, skipped: false };
+  }
 }
 
 /**
- * Process video files only.
+ * Process a single video file.
+ * Returns { changed, skipped } booleans.
  */
-function processVideos(root, opts) {
-  const stats = { scanned: 0, changed: 0, skipped: 0, errors: 0 };
+function processSingleVideo(filePath, grandParent, month, opts) {
+  const existing = readExistingDate(filePath, VIDEO_TAGS_TO_READ);
+  const newDate = computeNewDate(existing, grandParent, month);
+  const isDefault = !existing;
 
-  for (const filePath of walkFiles(root)) {
-    if (!isVideoFile(filePath)) continue;
+  // Skip if year/month already match and every video tag is present.
+  const allVideoTagsPresent =
+    existing && VIDEO_DATE_TAGS.every(tag => typeof existing[tag] === 'string');
 
-    const parent = path.basename(path.dirname(filePath));        // month folder
-    const grandParent = path.basename(path.dirname(path.dirname(filePath))); // year folder
-
-    if (!YEAR_RE.test(grandParent) || !MONTH_PREFIX_RE.test(parent)) {
-      continue; // not inside a <YEAR>/<MM*> pair
-    }
-
-    const month = parent.slice(0, 2);
-
-    stats.scanned++;
-
-    const existing = readExistingDate(filePath, VIDEO_TAGS_TO_READ);
-    const newDate = computeNewDate(existing, grandParent, month);
-    const isDefault = !existing;
-
-    // Skip if year/month already match and every video tag is present.
-    const allVideoTagsPresent =
-      existing &&
-      VIDEO_DATE_TAGS.every(tag => typeof existing[tag] === 'string');
-
-    if (
-      existing &&
-      existing.year === grandParent &&
-      existing.month === month &&
-      allVideoTagsPresent
-    ) {
-      stats.skipped++;
-      if (opts.verbose) {
-        console.log(`SKIP (already correct): ${filePath}`);
-      }
-      continue;
-    }
-
+  if (
+    existing &&
+    existing.year === grandParent &&
+    existing.month === month &&
+    allVideoTagsPresent
+  ) {
     logStep(opts, filePath, isDefault, existing, newDate);
-    if (opts.dryRun) {
-      stats.changed++;
-      continue;
-    }
-
-    try {
-      writeVideoDate(filePath, newDate);
-      stats.changed++;
-      if (opts.verbose) console.log(`  OK`);
-    } catch (err) {
-      stats.errors++;
-      console.error(`ERROR writing ${filePath}: ${err.message}`);
-    }
+    return { changed: false, skipped: true };
   }
 
-  return stats;
+  // DRY-RUN: count but don't write, and log.
+  if (opts.dryRun) {
+    logStep(opts, filePath, isDefault, existing, newDate);
+    return { changed: true, skipped: false };
+  }
+
+  try {
+    writeVideoDate(filePath, newDate);
+    logStep(opts, filePath, isDefault, existing, newDate);
+    return { changed: true, skipped: false };
+  } catch (err) {
+    console.error(`ERROR writing ${filePath}: ${err.message}`);
+    return { changed: false, skipped: false };
+  }
 }
 
 /**
- * Process both images and videos, returning merged stats.
+ * Process both images and videos in a single pass.
  */
 function processMedia(root, opts) {
-  const imageStats = processImages(root, opts);
-  const videoStats = processVideos(root, opts);
+  const stats = { scanned: 0, changed: 0, skipped: 0, errors: 0 };
 
-  return {
-    scanned: imageStats.scanned + videoStats.scanned,
-    changed: imageStats.changed + videoStats.changed,
-    skipped: imageStats.skipped + videoStats.skipped,
-    errors: imageStats.errors + videoStats.errors,
-  };
+  for (const filePath of walkFiles(root)) {
+    const parent = path.basename(path.dirname(filePath));        // month folder
+    const grandParent = path.basename(path.dirname(path.dirname(filePath))); // year folder
+
+    if (!YEAR_RE.test(grandParent) || !MONTH_PREFIX_RE.test(parent)) {
+      continue; // not inside a <YEAR>/<MM*> pair
+    }
+
+    const month = parent.slice(0, 2);
+    stats.scanned++;
+
+    if (isImageFile(filePath)) {
+      const result = processSingleImage(filePath, grandParent, month, opts);
+      if (result.skipped) stats.skipped++;
+      else if (result.changed) stats.changed++;
+    } else if (isVideoFile(filePath)) {
+      const result = processSingleVideo(filePath, grandParent, month, opts);
+      if (result.skipped) stats.skipped++;
+      else if (result.changed) stats.changed++;
+    }
+    // Non-matching extensions are ignored (already filtered by walk logic).
+  }
+
+  return stats;
 }
 
-module.exports = { processMedia, processImages, processVideos };
+module.exports = { processMedia };
 
 function logStep(opts, filePath, isDefault, existing, newDate) {
   if (opts.dryRun || opts.verbose) {
