@@ -18,17 +18,16 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const { walkFiles, isImageFile, isVideoFile } = require('./fs-utils');
 const { readExistingDate, writeDate, writeVideoDate } = require('./exif');
 const {
   YEAR_RE,
   MONTH_PREFIX_RE,
   DEFAULT_EXIF_DATE,
+  IMAGE_DATE_TAGS,
   VIDEO_DATE_TAGS,
-  VIDEO_TAGS_TO_READ,
 } = require('./config');
-
-const IMAGE_TAGS = ['DateTimeOriginal', 'CreateDate'];
 
 /**
  * Compute the target date string from existing metadata and folder names.
@@ -43,23 +42,26 @@ function computeNewDate(existing, grandParent, month) {
   return `${grandParent}:${month}:${defaultDay} ${defaultTime}`;
 }
 
+function fileModifyDateMatches(filePath, targetDate) {
+  const mtime = fs.statSync(filePath).mtime;
+  const mtimeFormatted = `${mtime.getFullYear()}:${String(mtime.getMonth() + 1).padStart(2, '0')}:${String(mtime.getDate()).padStart(2, '0')} ${String(mtime.getHours()).padStart(2, '0')}:${String(mtime.getMinutes()).padStart(2, '0')}:${String(mtime.getSeconds()).padStart(2, '0')}`;
+  return mtimeFormatted === targetDate;
+}
+
 /**
  * Process a single image file.
  * Returns { changed, skipped } booleans (whether the file was changed/skipped).
  */
 function processSingleImage(filePath, grandParent, month, opts) {
-  const existing = readExistingDate(filePath);
+  const existing = readExistingDate(filePath, IMAGE_DATE_TAGS);
   const newDate = computeNewDate(existing, grandParent, month);
   const isDefault = !existing;
 
-  // Skip if year/month already match and both image tags are present.
-  if (
-    existing &&
-    existing.year === grandParent &&
-    existing.month === month &&
-    existing.hasDateTimeOriginal &&
-    existing.hasCreateDate
-  ) {
+  // Check if all date tags already match the target date.
+  const tagsMatch = existing && IMAGE_DATE_TAGS.every(tag => existing[tag] === newDate);
+
+  // Skip only if all configured image tags and FileModifyDate match.
+  if (tagsMatch && fileModifyDateMatches(filePath, newDate)) {
     logStep(opts, filePath, isDefault, existing, newDate);
     return { changed: false, skipped: true };
   }
@@ -85,20 +87,15 @@ function processSingleImage(filePath, grandParent, month, opts) {
  * Returns { changed, skipped } booleans.
  */
 function processSingleVideo(filePath, grandParent, month, opts) {
-  const existing = readExistingDate(filePath, VIDEO_TAGS_TO_READ);
+  const existing = readExistingDate(filePath, VIDEO_DATE_TAGS);
   const newDate = computeNewDate(existing, grandParent, month);
   const isDefault = !existing;
 
-  // Skip if year/month already match and every video tag is present.
-  const allVideoTagsPresent =
-    existing && VIDEO_DATE_TAGS.every(tag => typeof existing[tag] === 'string');
+  // Check the same video tags that writeVideoDate writes, plus FileModifyDate.
+  const allVideoDateTagsMatch =
+    existing && VIDEO_DATE_TAGS.every(tag => existing[tag] === newDate);
 
-  if (
-    existing &&
-    existing.year === grandParent &&
-    existing.month === month &&
-    allVideoTagsPresent
-  ) {
+  if (allVideoDateTagsMatch && fileModifyDateMatches(filePath, newDate)) {
     logStep(opts, filePath, isDefault, existing, newDate);
     return { changed: false, skipped: true };
   }

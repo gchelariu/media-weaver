@@ -9,7 +9,6 @@ const {
   TAGS_TO_WRITE,
   DATE_FORMAT,
   VIDEO_DATE_TAGS,
-  VIDEO_TAGS_TO_READ,
 } = require('./config');
 
 function checkExiftool() {
@@ -20,6 +19,22 @@ function checkExiftool() {
     console.error('Install it (e.g. `apt install libimage-exiftool-perl` or `brew install exiftool`) and try again.');
     process.exit(1);
   }
+}
+
+function readTagValue(obj, tag) {
+  const isXmpTag = tag.startsWith('XMP:');
+  const tagName = isXmpTag ? tag.slice('XMP:'.length) : tag;
+  const matchingValues = Object.entries(obj)
+    .filter(([key]) => key.endsWith(`:${tagName}`) && key.startsWith('XMP-') === isXmpTag)
+    .map(([, value]) => value)
+    .filter(value => typeof value === 'string');
+
+  // A tag such as TrackCreateDate can occur on multiple tracks. Consider it
+  // matched only when every reported instance agrees.
+  if (!matchingValues.length || matchingValues.some(value => value !== matchingValues[0])) {
+    return undefined;
+  }
+  return matchingValues[0];
 }
 
 /**
@@ -37,7 +52,7 @@ function readExistingDate(filePath, extraTags) {
   try {
     out = execFileSync(
       'exiftool',
-      ['-json', '-d', DATE_FORMAT, ...tagsToRead.map(tag => `-${tag}`), filePath],
+      ['-json', '-G1', '-d', DATE_FORMAT, ...tagsToRead.map(tag => `-${tag}`), filePath],
       { encoding: 'utf8' }
     );
   } catch (err) {
@@ -54,7 +69,7 @@ function readExistingDate(filePath, extraTags) {
   const obj = arr && arr.length ? arr[0] : {};
   let first = null;
   for (const tag of TAGS_TO_READ) {
-    const value = obj[tag];
+    const value = readTagValue(obj, tag);
     if (typeof value !== 'string') continue;
     const m = value.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}:\d{2}:\d{2})$/);
     if (m) {
@@ -73,13 +88,13 @@ function readExistingDate(filePath, extraTags) {
 
   const result = {
     ...first,
-    hasDateTimeOriginal: typeof obj.DateTimeOriginal === 'string',
-    hasCreateDate: typeof obj.CreateDate === 'string',
+    hasDateTimeOriginal: typeof readTagValue(obj, 'DateTimeOriginal') === 'string',
+    hasCreateDate: typeof readTagValue(obj, 'CreateDate') === 'string',
   };
 
   if (extraTags) {
     for (const tag of extraTags) {
-      result[tag] = typeof obj[tag] === 'string' ? obj[tag] : undefined;
+      result[tag] = readTagValue(obj, tag);
     }
   }
 
