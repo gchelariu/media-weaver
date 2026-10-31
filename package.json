@@ -1,0 +1,17 @@
+{
+  "name": "media-weaver",
+  "version": "1.0.0",
+  "description": "CLI utility that syncs photo dates with folder structure",
+  "main": "main.js",
+  "bin": {
+    "mweaver": "./main.js"
+  },
+  "scripts": {
+    "start": "node main.js",
+    "test": "node tests/run.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  }
+}

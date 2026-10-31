@@ -5,8 +5,7 @@
 
 const { execFileSync } = require('child_process');
 const {
-  TAGS_TO_READ,
-  TAGS_TO_WRITE,
+  IMAGE_DATE_TAGS,
   DATE_FORMAT,
   VIDEO_DATE_TAGS,
 } = require('./config');
@@ -37,16 +36,21 @@ function readTagValue(obj, tag) {
   return matchingValues[0];
 }
 
+function exifToolError(action, err) {
+  const stderr = err.stderr && err.stderr.toString().trim();
+  return new Error(`ExifTool failed to ${action}: ${stderr || err.message}`);
+}
+
 /**
  * Read the existing date/taken time from a file.
- * Returns { year, month, day, time, raw, hasDateTimeOriginal, hasCreateDate }
- * or null if no usable date exists.
+ * Returns { year, month, day, time, raw, ...requestedTags }
+ * or null if ExifTool reads the file but no usable date exists.
  *
  * If `extraTags` is provided (e.g. for videos), those tags are also read and
  * copied onto the returned object so callers can check whether they're present.
  */
 function readExistingDate(filePath, extraTags) {
-  const tagsToRead = extraTags ? [...TAGS_TO_READ, ...extraTags] : TAGS_TO_READ;
+  const tagsToRead = [...new Set([...IMAGE_DATE_TAGS.slice(0, 2), ...(extraTags || [])])];
 
   let out;
   try {
@@ -56,19 +60,19 @@ function readExistingDate(filePath, extraTags) {
       { encoding: 'utf8' }
     );
   } catch (err) {
-    return null;
+    throw exifToolError(`read metadata from ${filePath}`, err);
   }
 
   let arr;
   try {
     arr = JSON.parse(out);
   } catch (err) {
-    return null;
+    throw new Error(`Could not parse ExifTool metadata for ${filePath}: ${err.message}`);
   }
 
   const obj = arr && arr.length ? arr[0] : {};
   let first = null;
-  for (const tag of TAGS_TO_READ) {
+  for (const tag of IMAGE_DATE_TAGS.slice(0, 2)) {
     const value = readTagValue(obj, tag);
     if (typeof value !== 'string') continue;
     const m = value.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}:\d{2}:\d{2})$/);
@@ -88,8 +92,6 @@ function readExistingDate(filePath, extraTags) {
 
   const result = {
     ...first,
-    hasDateTimeOriginal: typeof readTagValue(obj, 'DateTimeOriginal') === 'string',
-    hasCreateDate: typeof readTagValue(obj, 'CreateDate') === 'string',
   };
 
   if (extraTags) {
@@ -101,83 +103,63 @@ function readExistingDate(filePath, extraTags) {
   return result;
 }
 
-/**
- * Build the date-tag exiftool args (plus overwrite/minor-error flags).
- */
-function dateArgs(newDate) {
+function dateArgs(tags, newDate) {
   const args = ['-overwrite_original', '-m', '-api', 'IgnoreMinorErrors=1'];
-  for (const tag of TAGS_TO_WRITE) {
+  for (const tag of tags) {
     args.push(`-${tag}=${newDate}`);
   }
   return args;
 }
 
-/**
- * Write the new date to the file's EXIF tags.
- * If the file has corrupt EXIF structure (e.g. bad OtherImageStart data),
- * the normal write may fail. In that case we wipe the broken EXIF block
- * with `-exif:all=` and write fresh metadata.
- */
-function writeDate(filePath, newDate) {
-  const args = [...dateArgs(newDate), filePath];
-  try {
-    execFileSync("exiftool", args, { encoding: "utf8" });
-  } catch (err) {
-    // Fallback: delete all existing EXIF (removing corrupt data), then write fresh metadata.
-    const wipeArgs = [
-      "-overwrite_original",
-      "-m",
-      "-api",
-      "IgnoreMinorErrors=1",
-      "-exif:all=",
-      ...dateArgs(newDate),
-      filePath,
-    ];
-    execFileSync("exiftool", wipeArgs, { encoding: "utf8" });
-  }
-
-  // Also set the file modification date to match.
-  const fmArgs = ["-overwrite_original", `-FileModifyDate=${newDate}`, filePath];
-  execFileSync("exiftool", fmArgs, { encoding: "utf8" });
+function isKnownExifStructureError(err) {
+  const message = `${err.message || ''}\n${err.stderr || ''}`;
+  return /(?:bad|corrupt|invalid).*OtherImageStart|OtherImageStart.*(?:bad|corrupt|invalid)/i.test(message);
 }
 
-module.exports = { checkExiftool, readExistingDate, writeDate, writeVideoDate };
-
-/**
- * Build the exiftool args for writing all video metadata date tags.
- */
-function videoDateArgs(newDate) {
-  const args = ['-overwrite_original', '-m', '-api', 'IgnoreMinorErrors=1'];
-  for (const tag of VIDEO_DATE_TAGS) {
-    args.push(`-${tag}=${newDate}`);
-  }
-  return args;
-}
-
-/**
- * Write all metadata dates for a video file, then set the file
- * modification date in a second exiftool call (matching the manual
- * exiftool command used for videos).
- */
-function writeVideoDate(filePath, newDate) {
-  const writeArgs = [...videoDateArgs(newDate), filePath];
+function writeMetadataDate(filePath, newDate, tags) {
+  const args = [...dateArgs(tags, newDate), filePath];
   try {
-    execFileSync('exiftool', writeArgs, { encoding: 'utf8' });
+    execFileSync('exiftool', args, { encoding: 'utf8' });
   } catch (err) {
-    // Fallback: delete all existing EXIF (removing corrupt data), then write fresh metadata.
+    // Only wipe EXIF for the specific known broken structure this fallback handles.
+    if (!isKnownExifStructureError(err)) {
+      throw exifToolError(`write metadata to ${filePath}`, err);
+    }
+
     const wipeArgs = [
-      '-overwrite_original',
-      '-m',
-      '-api',
-      'IgnoreMinorErrors=1',
+      ...args.slice(0, 4),
       '-exif:all=',
-      ...videoDateArgs(newDate),
+      ...args.slice(4, -1),
       filePath,
     ];
-    execFileSync('exiftool', wipeArgs, { encoding: 'utf8' });
+    try {
+      execFileSync('exiftool', wipeArgs, { encoding: 'utf8' });
+    } catch (fallbackErr) {
+      throw exifToolError(`repair EXIF and write metadata to ${filePath}`, fallbackErr);
+    }
   }
 
-  // Second pass: set FileModifyDate.
   const fmArgs = ['-overwrite_original', `-FileModifyDate=${newDate}`, filePath];
-  execFileSync('exiftool', fmArgs, { encoding: 'utf8' });
+  try {
+    execFileSync('exiftool', fmArgs, { encoding: 'utf8' });
+  } catch (err) {
+    throw exifToolError(`set FileModifyDate on ${filePath}`, err);
+  }
 }
+
+function writeDate(filePath, newDate) {
+  return writeMetadataDate(filePath, newDate, IMAGE_DATE_TAGS);
+}
+
+function writeVideoDate(filePath, newDate) {
+  return writeMetadataDate(filePath, newDate, VIDEO_DATE_TAGS);
+}
+
+module.exports = {
+  checkExiftool,
+  isKnownExifStructureError,
+  readExistingDate,
+  readTagValue,
+  writeDate,
+  writeVideoDate,
+};

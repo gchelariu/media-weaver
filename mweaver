@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# mweaver – thin wrapper that delegates to main.js via node
+# -----------------------------------------------------------------
+# Show error and exit if no arguments are given.
+if [[ $# -eq 0 ]]; then
+  echo "Error: no arguments supplied." >&2
+  echo "Usage: mweaver <root-folder> [--dry-run] [--verbose]" >&2
+  echo "Try 'mweaver --help' for more information." >&2
+  exit 1
+fi
+exec node "$(dirname "$0")/main.js" "$@"

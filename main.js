@@ -12,11 +12,11 @@ const { processMedia } = require('./processor');
 
 function printHelp() {
   console.log(`
-Usage: node fix-photo-dates.js <root-folder> [--dry-run] [--verbose]
+Usage: mweaver <root-folder> [--dry-run] [--verbose]
 
-  Sets DateTimeOriginal and CreateDate of every image inside a
-  <YEAR>/<MM>/ folder so the date matches the folder names, keeping
-  the existing day and time.
+  Syncs configured image and video date metadata, including FileModifyDate,
+  to each file's <YEAR>/<MM> folder. Existing day and time are preserved.
+  Files without a usable date receive the configured default day and time.
 
 Arguments:
   <root-folder>   Top-level folder containing the year folders.
@@ -28,8 +28,8 @@ Options:
   --help, -h      Show this help.
 
 Example:
-  node fix-photo-dates.js ~/Pictures --dry-run
-  node fix-photo-dates.js ~/Pictures
+  mweaver ~/Pictures --dry-run
+  mweaver ~/Pictures
 `);
 }
 

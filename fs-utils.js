@@ -20,18 +20,22 @@ function isVideoFile(filePath) {
 /**
  * Recursively yield every file under `dir`.
  */
-function* walkFiles(dir) {
+function* walkFiles(dir, onError) {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch (err) {
-    return;
+    if (onError) {
+      onError(dir, err);
+      return;
+    }
+    throw err;
   }
 
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      yield* walkFiles(full);
+      yield* walkFiles(full, onError);
     } else if (entry.isFile()) {
       yield full;
     }

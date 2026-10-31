@@ -13,8 +13,8 @@
  * Single-pass behavior:
  *   - Files that already have an EXIF date: keep existing day/time, update
  *     year/month to match the folder.
- *   - Files with NO EXIF date: create EXIF metadata using the folder's
- *     year/month with default day/time (01 01:00:00).
+ *   - Files with no usable date: create metadata using the folder's year/month
+ *     and the configured default day/time.
  */
 
 const path = require('path');
@@ -52,67 +52,38 @@ function fileModifyDateMatches(filePath, targetDate) {
  * Process a single image file.
  * Returns { changed, skipped } booleans (whether the file was changed/skipped).
  */
-function processSingleImage(filePath, grandParent, month, opts) {
-  const existing = readExistingDate(filePath, IMAGE_DATE_TAGS);
-  const newDate = computeNewDate(existing, grandParent, month);
-  const isDefault = !existing;
-
-  // Check if all date tags already match the target date.
-  const tagsMatch = existing && IMAGE_DATE_TAGS.every(tag => existing[tag] === newDate);
-
-  // Skip only if all configured image tags and FileModifyDate match.
-  if (tagsMatch && fileModifyDateMatches(filePath, newDate)) {
-    logStep(opts, filePath, isDefault, existing, newDate);
-    return { changed: false, skipped: true };
-  }
-
-  // DRY-RUN: count but don't write, and log.
-  if (opts.dryRun) {
-    logStep(opts, filePath, isDefault, existing, newDate);
-    return { changed: true, skipped: false };
-  }
-
+function processSingleMedia(filePath, year, month, tags, writeDateForType, opts) {
   try {
-    writeDate(filePath, newDate);
+    const existing = readExistingDate(filePath, tags);
+    const newDate = computeNewDate(existing, year, month);
+    const isDefault = !existing;
+    const tagsMatch = existing && tags.every(tag => existing[tag] === newDate);
+
+    if (tagsMatch && fileModifyDateMatches(filePath, newDate)) {
+      logStep(opts, filePath, isDefault, existing, newDate);
+      return { skipped: true, changed: false, error: false };
+    }
+
+    if (opts.dryRun) {
+      logStep(opts, filePath, isDefault, existing, newDate);
+      return { skipped: false, changed: true, error: false };
+    }
+
+    writeDateForType(filePath, newDate);
+
+    // Do not report a successful write unless the configured metadata and
+    // filesystem timestamp can be read back with the requested values.
+    const written = readExistingDate(filePath, tags);
+    const tagsWritten = written && tags.every(tag => written[tag] === newDate);
+    if (!tagsWritten || !fileModifyDateMatches(filePath, newDate)) {
+      throw new Error('Post-write verification failed: one or more dates do not match the target');
+    }
+
     logStep(opts, filePath, isDefault, existing, newDate);
-    return { changed: true, skipped: false };
+    return { skipped: false, changed: true, error: false };
   } catch (err) {
-    console.error(`ERROR writing ${filePath}: ${err.message}`);
-    return { changed: false, skipped: false };
-  }
-}
-
-/**
- * Process a single video file.
- * Returns { changed, skipped } booleans.
- */
-function processSingleVideo(filePath, grandParent, month, opts) {
-  const existing = readExistingDate(filePath, VIDEO_DATE_TAGS);
-  const newDate = computeNewDate(existing, grandParent, month);
-  const isDefault = !existing;
-
-  // Check the same video tags that writeVideoDate writes, plus FileModifyDate.
-  const allVideoDateTagsMatch =
-    existing && VIDEO_DATE_TAGS.every(tag => existing[tag] === newDate);
-
-  if (allVideoDateTagsMatch && fileModifyDateMatches(filePath, newDate)) {
-    logStep(opts, filePath, isDefault, existing, newDate);
-    return { changed: false, skipped: true };
-  }
-
-  // DRY-RUN: count but don't write, and log.
-  if (opts.dryRun) {
-    logStep(opts, filePath, isDefault, existing, newDate);
-    return { changed: true, skipped: false };
-  }
-
-  try {
-    writeVideoDate(filePath, newDate);
-    logStep(opts, filePath, isDefault, existing, newDate);
-    return { changed: true, skipped: false };
-  } catch (err) {
-    console.error(`ERROR writing ${filePath}: ${err.message}`);
-    return { changed: false, skipped: false };
+    console.error(`ERROR processing ${filePath}: ${err.message}`);
+    return { skipped: false, changed: false, error: true };
   }
 }
 
@@ -122,7 +93,12 @@ function processSingleVideo(filePath, grandParent, month, opts) {
 function processMedia(root, opts) {
   const stats = { scanned: 0, changed: 0, skipped: 0, errors: 0 };
 
-  for (const filePath of walkFiles(root)) {
+  const onWalkError = (directory, err) => {
+    stats.errors++;
+    console.error(`ERROR reading directory ${directory}: ${err.message}`);
+  };
+
+  for (const filePath of walkFiles(root, onWalkError)) {
     const parent = path.basename(path.dirname(filePath));        // month folder
     const grandParent = path.basename(path.dirname(path.dirname(filePath))); // year folder
 
@@ -131,24 +107,26 @@ function processMedia(root, opts) {
     }
 
     const month = parent.slice(0, 2);
-    stats.scanned++;
-
+    let result;
     if (isImageFile(filePath)) {
-      const result = processSingleImage(filePath, grandParent, month, opts);
-      if (result.skipped) stats.skipped++;
-      else if (result.changed) stats.changed++;
+      stats.scanned++;
+      result = processSingleMedia(filePath, grandParent, month, IMAGE_DATE_TAGS, writeDate, opts);
     } else if (isVideoFile(filePath)) {
-      const result = processSingleVideo(filePath, grandParent, month, opts);
-      if (result.skipped) stats.skipped++;
-      else if (result.changed) stats.changed++;
+      stats.scanned++;
+      result = processSingleMedia(filePath, grandParent, month, VIDEO_DATE_TAGS, writeVideoDate, opts);
+    } else {
+      continue;
     }
-    // Non-matching extensions are ignored (already filtered by walk logic).
+
+    if (result.skipped) stats.skipped++;
+    if (result.changed) stats.changed++;
+    if (result.error) stats.errors++;
   }
 
   return stats;
 }
 
-module.exports = { processMedia };
+module.exports = { computeNewDate, fileModifyDateMatches, processMedia };
 
 function logStep(opts, filePath, isDefault, existing, newDate) {
   if (opts.dryRun || opts.verbose) {
